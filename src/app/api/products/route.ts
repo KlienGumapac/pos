@@ -1,0 +1,250 @@
+import { NextRequest, NextResponse } from 'next/server';
+import connectDB from '@/lib/mongodb';
+import Product from '@/lib/product';
+
+// GET - Fetch all products
+export async function GET(request: NextRequest) {
+  try {
+    const dbConnection = await connectDB();
+    
+    if (!dbConnection) {
+      return NextResponse.json(
+        { success: false, error: 'Database connection not available' },
+        { status: 503 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || '';
+    const category = searchParams.get('category') || '';
+    const sortBy = searchParams.get('sortBy') || 'name';
+    const sortOrder = searchParams.get('sortOrder') || 'asc';
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '50', 10)));
+    const skip = (page - 1) * limit;
+
+    // Build query
+    let query: any = {};
+
+    // Search filter
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Category filter
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    // Build sort object
+    const sortObj: any = {};
+    sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Get total count for pagination
+    const total = await Product.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Get products with pagination
+    const products = await Product.find(query)
+      .sort(sortObj)
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format products
+    const formattedProducts = products.map((product: any) => ({
+      id: product._id.toString(),
+      name: product.name,
+      description: product.description,
+      sku: product.sku,
+      barcode: product.barcode,
+      price: product.price,
+      cost: product.cost,
+      category: product.category,
+      stock: product.stock,
+      minStock: product.minStock,
+      isActive: product.isActive,
+      images: product.images,
+      phoneIdentifiers: product.phoneIdentifiers || [],
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt
+    }));
+
+    return NextResponse.json({
+      success: true,
+      products: formattedProducts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages
+      }
+    });
+
+  } catch (error) {
+    console.error('Get products error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to fetch products' },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Create new product
+export async function POST(request: NextRequest) {
+  try {
+    const dbConnection = await connectDB();
+    
+    if (!dbConnection) {
+      return NextResponse.json(
+        { success: false, error: 'Database connection not available' },
+        { status: 503 }
+      );
+    }
+
+    const {
+      name,
+      description,
+      sku,
+      barcode,
+      price,
+      cost,
+      category,
+      stock,
+      minStock,
+      images,
+      phoneIdentifiers
+    } = await request.json();
+
+    console.log('API: Creating product with phoneIdentifiers:', phoneIdentifiers);
+    console.log('API: phoneIdentifiers type:', typeof phoneIdentifiers);
+    console.log('API: phoneIdentifiers is array:', Array.isArray(phoneIdentifiers));
+
+    // Validation
+    if (!name || !price || !category || stock === undefined) {
+      return NextResponse.json(
+        { success: false, error: 'Required fields: name, price, category, stock' },
+        { status: 400 }
+      );
+    }
+
+    // Ensure phoneIdentifiers is properly formatted
+    const cleanPhoneIdentifiers = Array.isArray(phoneIdentifiers) ? phoneIdentifiers : [];
+    console.log('API: Clean phoneIdentifiers:', cleanPhoneIdentifiers);
+
+    if (price < 0 || (cost !== undefined && cost < 0) || stock < 0 || minStock < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Price, cost, stock, and minStock cannot be negative' },
+        { status: 400 }
+      );
+    }
+
+    // Auto-generate SKU if not provided
+    let finalSku = sku;
+    if (!finalSku) {
+      // Generate SKU: First 3 letters of category + timestamp + random 3 digits
+      const categoryPrefix = category.substring(0, 3).toUpperCase();
+      const timestamp = Date.now().toString().slice(-6);
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      finalSku = `${categoryPrefix}-${timestamp}${random}`;
+    } else {
+      finalSku = finalSku.toUpperCase();
+    }
+
+    // Check if SKU already exists
+    const existingProduct = await Product.findOne({ sku: finalSku });
+    if (existingProduct) {
+      return NextResponse.json(
+        { success: false, error: 'SKU already exists' },
+        { status: 400 }
+      );
+    }
+
+    // Check if barcode already exists (if provided)
+    if (barcode) {
+      const existingBarcode = await Product.findOne({ barcode });
+      if (existingBarcode) {
+        return NextResponse.json(
+          { success: false, error: 'Barcode already exists' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Create new product
+    const product = new Product({
+      name: name.trim(),
+      description: description?.trim() || '',
+      sku: finalSku.trim(),
+      barcode: barcode?.trim() || '',
+      price: parseFloat(price),
+      cost: cost !== undefined ? parseFloat(cost) : 0,
+      category: category.trim(),
+      stock: parseInt(stock),
+      minStock: parseInt(minStock) || 0,
+      images: images || [],
+      phoneIdentifiers: cleanPhoneIdentifiers
+    });
+
+    // Ensure Mongoose persists the phoneIdentifiers array (needed for array of subdocuments)
+    if (cleanPhoneIdentifiers.length > 0) {
+      product.phoneIdentifiers = cleanPhoneIdentifiers;
+      product.markModified('phoneIdentifiers');
+    }
+
+    await product.save();
+
+    // Build response; ensure phoneIdentifiers is a plain array (subdocuments may not JSON.stringify otherwise)
+    const rawIds = product.phoneIdentifiers || [];
+    const phoneIdentifiersPlain = Array.isArray(rawIds)
+      ? rawIds.map((p: { imei?: string; serialNumber?: string }) => ({
+          imei: (p && p.imei) ? String(p.imei) : '',
+          serialNumber: (p && p.serialNumber) ? String(p.serialNumber) : ''
+        }))
+      : [];
+
+    const productResponse = {
+      id: product._id.toString(),
+      name: product.name,
+      description: product.description,
+      sku: product.sku,
+      barcode: product.barcode,
+      price: product.price,
+      cost: product.cost,
+      category: product.category,
+      stock: product.stock,
+      minStock: product.minStock,
+      isActive: product.isActive,
+      images: product.images || [],
+      phoneIdentifiers: phoneIdentifiersPlain,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt
+    };
+
+    return NextResponse.json({
+      success: true,
+      message: 'Product created successfully',
+      product: productResponse
+    });
+
+  } catch (error) {
+    console.error('Create product error:', error);
+    
+    // Handle duplicate key errors
+    if (error instanceof Error && error.message.includes('duplicate key')) {
+      return NextResponse.json(
+        { success: false, error: 'SKU or barcode already exists' },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { success: false, error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
