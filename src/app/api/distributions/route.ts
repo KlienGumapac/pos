@@ -183,6 +183,8 @@ export async function GET(request: NextRequest) {
     if (cashierId) query.cashierId = cashierId;
     if (status) query.status = status;
     if (adminId) query.adminId = adminId;
+    // Exclude sender-only display records when listing by cashierId or when listing all (e.g. admin view)
+    if (cashierId || !adminId) query.$or = [{ isSentOnly: { $ne: true } }, { isSentOnly: { $exists: false } }];
 
     const distributions = await Distribution.find(query)
       .sort({ createdAt: -1 })
@@ -196,8 +198,8 @@ export async function GET(request: NextRequest) {
       totalValue: dist.totalValue,
       status: dist.status,
       notes: dist.notes,
-      createdAt: dist.createdAt,
-      updatedAt: dist.updatedAt
+      createdAt: dist.createdAt instanceof Date ? dist.createdAt.toISOString() : dist.createdAt,
+      updatedAt: dist.updatedAt instanceof Date ? dist.updatedAt.toISOString() : dist.updatedAt
     }));
 
     return NextResponse.json({

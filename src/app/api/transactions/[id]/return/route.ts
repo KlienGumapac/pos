@@ -101,7 +101,8 @@ export async function POST(
       // Increase stock back to distributions
       const distributions = await Distribution.find({
         cashierId: transaction.cashierId,
-        status: { $in: ['pending', 'delivered', 'cancelled'] }
+        status: { $in: ['pending', 'delivered', 'cancelled'] },
+        $or: [{ isSentOnly: { $ne: true } }, { isSentOnly: { $exists: false } }]
       }).sort({ createdAt: -1 });
 
       // Try to add back stock to existing distribution items first

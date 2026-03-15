@@ -91,7 +91,8 @@ export async function POST(request: NextRequest) {
     // Find all distributions for this cashier that have these products
     const distributions = await Distribution.find({
       cashierId: cashierId,
-      status: { $in: ['pending', 'delivered'] }
+      status: { $in: ['pending', 'delivered'] },
+      $or: [{ isSentOnly: { $ne: true } }, { isSentOnly: { $exists: false } }]
     });
 
     // Create a map to track remaining quantities needed to decrease

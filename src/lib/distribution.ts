@@ -19,6 +19,8 @@ export interface IDistribution extends Document {
   totalValue: number;
   status: 'pending' | 'delivered' | 'cancelled';
   notes?: string;
+  /** When true, this record is only for sender's "Distributed" tab; do not count as receiver inventory */
+  isSentOnly?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,7 +51,8 @@ const DistributionSchema = new Schema({
     enum: ['pending', 'delivered', 'cancelled'], 
     default: 'pending' 
   },
-  notes: { type: String }
+  notes: { type: String },
+  isSentOnly: { type: Boolean, default: false }
 }, {
   timestamps: true
 });

@@ -478,6 +478,15 @@ function CashierStocksPageContent() {
     });
   };
 
+  // Format distribution date: treat server date as UTC (append Z if missing) and show in local time
+  const formatDistributionDate = (iso: string | undefined): string => {
+    if (!iso) return '—';
+    const str = typeof iso === 'string' && !/Z$/i.test(iso.trim()) && iso.length >= 19 ? iso.trim() + 'Z' : iso;
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: true });
+  };
+
   const handleViewTransactionDetails = (transaction: Transaction) => {
     setSelectedTransaction(transaction);
     setIsTransactionModalOpen(true);
@@ -1799,13 +1808,26 @@ function CashierStocksPageContent() {
                 <div className="space-y-6">
                   <Card>
                     <CardHeader>
-                      <CardTitle className="flex items-center space-x-2">
-                        <Send className="w-5 h-5" />
-                        <span>Distributed Items</span>
-                      </CardTitle>
-                      <CardDescription>
-                        All items you have distributed to other cashiers
-                      </CardDescription>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <CardTitle className="flex items-center space-x-2">
+                            <Send className="w-5 h-5" />
+                            <span>Distributed Items</span>
+                          </CardTitle>
+                          <CardDescription>
+                            Products you sent and the cashier you distributed to
+                          </CardDescription>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { loadCashiers(); loadSentDistributions(); }}
+                          disabled={isLoadingSentDistributions}
+                        >
+                          <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingSentDistributions ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       {isLoadingSentDistributions ? (
@@ -1826,7 +1848,7 @@ function CashierStocksPageContent() {
                           {sentDistributions.map((dist) => {
                             const receiverCashier = cashiers.find((c: any) => (c.id || c._id) === dist.cashierId);
                             const receiverName = receiverCashier ? (receiverCashier.username || receiverCashier.name || receiverCashier.email || `Cashier #${(dist.cashierId || '').slice(-6)}`) : `Cashier #${(dist.cashierId || '').slice(-6)}`;
-                            const distDate = dist.createdAt ? new Date(dist.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+                            const distDate = formatDistributionDate(dist.createdAt);
                             return (
                               <div key={dist.id} className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 bg-slate-50 dark:bg-slate-800">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">

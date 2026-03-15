@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
@@ -28,9 +28,13 @@ import {
   PieChart as PieChartIcon,
   LineChart as LineChartIcon,
   Loader2,
-  RotateCcw
+  RotateCcw,
+  Share2,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { TransactionService, Transaction } from "@/lib/transactionService";
+import { DistributionService, Distribution } from "@/lib/distributionService";
 import { UserService } from "@/lib/userService";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -88,12 +92,29 @@ export default function SalesPage() {
   });
   const [selectedCashier, setSelectedCashier] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<"reports" | "transactions">("reports");
+  const [viewMode, setViewMode] = useState<"reports" | "transactions" | "cashierDistribution">("reports");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [cashiers, setCashiers] = useState<{ id: string; name: string }[]>([]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
+  const [cashierDistributions, setCashierDistributions] = useState<Distribution[]>([]);
+  const [isLoadingCashierDistributions, setIsLoadingCashierDistributions] = useState(false);
+
+  const TABLE_PAGE_SIZE = 10;
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [distributionPage, setDistributionPage] = useState(1);
+
+  const transactionTotalPages = Math.max(1, Math.ceil(filteredTransactions.length / TABLE_PAGE_SIZE));
+  const distributionTotalPages = Math.max(1, Math.ceil(cashierDistributions.length / TABLE_PAGE_SIZE));
+  const paginatedTransactions = useMemo(
+    () => filteredTransactions.slice((transactionPage - 1) * TABLE_PAGE_SIZE, transactionPage * TABLE_PAGE_SIZE),
+    [filteredTransactions, transactionPage]
+  );
+  const paginatedDistributions = useMemo(
+    () => cashierDistributions.slice((distributionPage - 1) * TABLE_PAGE_SIZE, distributionPage * TABLE_PAGE_SIZE),
+    [cashierDistributions, distributionPage]
+  );
 
   // Sales data calculated from transactions
   const [salesData, setSalesData] = useState({
@@ -116,6 +137,13 @@ export default function SalesPage() {
     applyFilters();
   }, [transactions, dateRange, selectedCashier, cashiers]);
 
+  useEffect(() => {
+    if (transactionPage > transactionTotalPages) setTransactionPage(1);
+  }, [transactionTotalPages, transactionPage]);
+  useEffect(() => {
+    if (distributionPage > distributionTotalPages) setDistributionPage(1);
+  }, [distributionTotalPages, distributionPage]);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -126,25 +154,34 @@ export default function SalesPage() {
         console.log('Loaded transactions:', transactionsResult.transactions);
       }
 
-      // Load cashiers
+      // Load cashiers and distributions
       const usersResult = await UserService.getUsers();
+      let cashierIdList: string[] = [];
       if (usersResult.success) {
         const cashierUsers = usersResult.users.filter((user: any) => user.user_type === 'cashier');
-        console.log('All users:', usersResult.users);
-        console.log('Cashier users:', cashierUsers);
-        
+        cashierIdList = cashierUsers.map((u: any) => u.id || u._id);
         const cashierOptions = [
           { id: "all", name: "All Cashiers" },
           ...cashierUsers.map((user: any) => ({ 
-            id: user.id, 
-            name: user.name || user.username || user.email || `User ${user.id.slice(-4)}` 
+            id: user.id || user._id, 
+            name: user.name || user.username || user.email || `User ${(user.id || user._id).toString().slice(-4)}` 
           }))
         ];
         setCashiers(cashierOptions);
-        console.log('Cashier options:', cashierOptions);
       }
+
+      setIsLoadingCashierDistributions(true);
+      const distResult = await DistributionService.getDistributions();
+      if (distResult.success && distResult.distributions) {
+        const cashierToCashier = distResult.distributions.filter((d: Distribution) => cashierIdList.includes(d.adminId));
+        setCashierDistributions(cashierToCashier);
+      } else {
+        setCashierDistributions([]);
+      }
+      setIsLoadingCashierDistributions(false);
     } catch (error) {
       console.error('Failed to load sales data:', error);
+      setIsLoadingCashierDistributions(false);
     } finally {
       setIsLoading(false);
     }
@@ -265,6 +302,15 @@ export default function SalesPage() {
     });
   };
 
+  // Distribution date: treat server time as UTC (append Z if missing), show in local time
+  const formatDistributionDate = (iso: string | undefined): string => {
+    if (!iso) return '—';
+    const str = typeof iso === 'string' && !/Z$/i.test(iso.trim()) && iso.length >= 19 ? iso.trim() + 'Z' : iso;
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: true });
+  };
+
   const formatTransactionDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -332,7 +378,7 @@ export default function SalesPage() {
           <div className="mb-8">
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border-0 p-6">
               <div className="flex items-center justify-between mb-6">
-                <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                <div className="flex flex-wrap gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
                   <Button
                     variant={viewMode === "reports" ? "default" : "ghost"}
                     size="sm"
@@ -350,6 +396,15 @@ export default function SalesPage() {
                   >
                     <Receipt className="w-4 h-4" />
                     <span>Transactions</span>
+                  </Button>
+                  <Button
+                    variant={viewMode === "cashierDistribution" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setViewMode("cashierDistribution")}
+                    className="flex items-center space-x-2"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>Cashier Distribution</span>
                   </Button>
                 </div>
                 
@@ -379,7 +434,7 @@ export default function SalesPage() {
                     id="startDate"
                     type="date"
                     value={dateRange.startDate}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                    onChange={(e) => { setDateRange(prev => ({ ...prev, startDate: e.target.value })); setTransactionPage(1); }}
                     className="mt-1"
                   />
                 </div>
@@ -389,13 +444,13 @@ export default function SalesPage() {
                     id="endDate"
                     type="date"
                     value={dateRange.endDate}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                    onChange={(e) => { setDateRange(prev => ({ ...prev, endDate: e.target.value })); setTransactionPage(1); }}
                     className="mt-1"
                   />
                 </div>
                 <div>
                   <Label htmlFor="cashier" className="text-sm font-medium">Cashier</Label>
-                  <Select value={selectedCashier} onValueChange={setSelectedCashier}>
+                  <Select value={selectedCashier} onValueChange={(v) => { setSelectedCashier(v); setTransactionPage(1); }}>
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Select cashier" />
                     </SelectTrigger>
@@ -435,7 +490,7 @@ export default function SalesPage() {
 
           {viewMode === "reports" ? (
             <>
-              {/* Sales Overview Cards */}
+              {/* Sales Overview Cards - Reports */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <Card className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -655,6 +710,116 @@ export default function SalesPage() {
                 </Card>
               </div>
             </>
+          ) : viewMode === "cashierDistribution" ? (
+            <>
+              {/* Cashier Distribution Table */}
+              <Card className="bg-white dark:bg-slate-800 shadow-lg border-0">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Share2 className="w-5 h-5" />
+                    <span>Cashier Distribution</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Cashier-to-cashier distributions: which cashier distributed which products to which cashier
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingCashierDistributions ? (
+                    <div className="flex justify-center py-12">
+                      <div className="flex flex-col items-center space-y-4">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        <p className="text-slate-600 dark:text-slate-400">Loading distributions...</p>
+                      </div>
+                    </div>
+                  ) : cashierDistributions.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Share2 className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                        No cashier distributions
+                      </h3>
+                      <p className="text-slate-600 dark:text-slate-400">
+                        When cashiers distribute products to other cashiers, those movements will appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                            <th className="text-left py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">Date</th>
+                            <th className="text-left py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">From (Cashier)</th>
+                            <th className="text-left py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">To (Cashier)</th>
+                            <th className="text-left py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">Products</th>
+                            <th className="text-right py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">Total Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedDistributions.map((dist) => (
+                            <tr key={dist.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                              <td className="py-4 px-6 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                {formatDistributionDate(dist.createdAt)}
+                              </td>
+                              <td className="py-4 px-6 font-medium text-slate-900 dark:text-slate-100">
+                                {getCashierName(dist.adminId)}
+                              </td>
+                              <td className="py-4 px-6 font-medium text-slate-900 dark:text-slate-100">
+                                {getCashierName(dist.cashierId)}
+                              </td>
+                              <td className="py-4 px-6">
+                                <ul className="space-y-1">
+                                  {dist.items?.map((item: any, idx: number) => (
+                                    <li key={idx} className="text-sm text-slate-600 dark:text-slate-400">
+                                      {item.productName} × {item.quantity}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </td>
+                              <td className="py-4 px-6 text-right font-medium text-green-600 dark:text-green-400">
+                                {formatCurrency(dist.totalValue ?? 0)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {distributionTotalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-4 mt-2 border-t border-slate-200 dark:border-slate-700">
+                        <p className="text-sm text-slate-600 dark:text-slate-400">
+                          Showing {(distributionPage - 1) * TABLE_PAGE_SIZE + 1}–{Math.min(distributionPage * TABLE_PAGE_SIZE, cashierDistributions.length)} of {cashierDistributions.length} distributions
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDistributionPage((p) => Math.max(1, p - 1))}
+                            disabled={distributionPage <= 1}
+                            className="gap-1"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                            Previous
+                          </Button>
+                          <span className="text-sm text-slate-600 dark:text-slate-400 px-2">
+                            Page {distributionPage} of {distributionTotalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDistributionPage((p) => Math.min(distributionTotalPages, p + 1))}
+                            disabled={distributionPage >= distributionTotalPages}
+                            className="gap-1"
+                          >
+                            Next
+                            <ChevronRight className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           ) : (
             <>
               {/* Transactions Table */}
@@ -689,6 +854,7 @@ export default function SalesPage() {
                       </p>
                     </div>
                   ) : (
+                    <>
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
@@ -723,7 +889,7 @@ export default function SalesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredTransactions.map((transaction) => (
+                          {paginatedTransactions.map((transaction) => (
                             <tr key={transaction.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/10 dark:hover:to-indigo-900/10 transition-all duration-200">
                               <td className="py-4 px-6">
                                 <div className="flex items-center space-x-2">
@@ -777,6 +943,39 @@ export default function SalesPage() {
                         </tbody>
                       </table>
                     </div>
+                    {transactionTotalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-4 mt-2 border-t border-slate-200 dark:border-slate-700">
+                        <p className="text-sm text-slate-600 dark:text-slate-400">
+                          Showing {(transactionPage - 1) * TABLE_PAGE_SIZE + 1}–{Math.min(transactionPage * TABLE_PAGE_SIZE, filteredTransactions.length)} of {filteredTransactions.length} transactions
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setTransactionPage((p) => Math.max(1, p - 1))}
+                            disabled={transactionPage <= 1}
+                            className="gap-1"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                            Previous
+                          </Button>
+                          <span className="text-sm text-slate-600 dark:text-slate-400 px-2">
+                            Page {transactionPage} of {transactionTotalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setTransactionPage((p) => Math.min(transactionTotalPages, p + 1))}
+                            disabled={transactionPage >= transactionTotalPages}
+                            className="gap-1"
+                          >
+                            Next
+                            <ChevronRight className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    </>
                   )}
                 </CardContent>
               </Card>

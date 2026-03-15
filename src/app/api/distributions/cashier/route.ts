@@ -55,10 +55,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if sender cashier has sufficient stock in their distributions
+    // Check if sender cashier has sufficient stock in their distributions (exclude sender-only display records)
     const senderDistributions = await Distribution.find({ 
       cashierId: senderCashierId,
-      status: { $in: ['pending', 'delivered'] }
+      status: { $in: ['pending', 'delivered'] },
+      $or: [{ isSentOnly: { $ne: true } }, { isSentOnly: { $exists: false } }]
     });
 
     // Calculate available stock for each product
@@ -146,12 +147,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if receiver already has distributions and add to existing or create new
-    const receiverDistributions = await Distribution.find({
-      cashierId: receiverCashierId,
-      status: { $in: ['pending', 'delivered'] }
-    });
-
     const itemsToAdd = items.map((item: any) => ({
       productId: item.productId,
       productName: item.productName,
@@ -163,46 +158,16 @@ export async function POST(request: NextRequest) {
       phoneIdentifiers: Array.isArray(item.phoneIdentifiers) ? item.phoneIdentifiers : []
     }));
 
-    // Try to add to existing distributions
-    let addedToExisting = false;
-    for (const dist of receiverDistributions) {
-      for (const itemToAdd of itemsToAdd) {
-        const existingItem = dist.items.find((di: any) => 
-          di.productId.toString() === itemToAdd.productId
-        );
-
-        if (existingItem) {
-          existingItem.quantity += itemToAdd.quantity;
-          existingItem.totalValue = existingItem.price * existingItem.quantity;
-          existingItem.phoneIdentifiers = [...(existingItem.phoneIdentifiers || []), ...(itemToAdd.phoneIdentifiers || [])];
-          addedToExisting = true;
-        } else {
-          dist.items.push(itemToAdd);
-          addedToExisting = true;
-        }
-      }
-
-      if (addedToExisting) {
-        dist.totalValue = dist.items.reduce((sum: number, di: any) => sum + di.totalValue, 0);
-        dist.markModified('items');
-        await dist.save();
-        break;
-      }
-    }
-
-    // If not added to existing, create a new distribution
-    if (!addedToExisting) {
-      const newDistribution = new Distribution({
-        adminId: senderCashierId, // Use sender as adminId for cashier-to-cashier
-        cashierId: receiverCashierId,
-        items: itemsToAdd,
-        totalValue,
-        notes: notes || `Distribution from cashier`,
-        status: 'delivered' // Auto-deliver cashier-to-cashier distributions
-      });
-
-      await newDistribution.save();
-    }
+    // Always create a new distribution so each send is unique (no merging)
+    const newDistribution = new Distribution({
+      adminId: senderCashierId,
+      cashierId: receiverCashierId,
+      items: itemsToAdd,
+      totalValue,
+      notes: notes || `Distribution from cashier`,
+      status: 'delivered'
+    });
+    await newDistribution.save();
 
     return NextResponse.json({
       success: true,
