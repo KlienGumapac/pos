@@ -116,14 +116,19 @@ export class ProductService {
     }
   }
 
-  static async adjustStock(id: string, adjustment: number, reason?: string) {
+  static async adjustStock(
+    id: string,
+    adjustment: number,
+    reason?: string,
+    phoneIdentifiersToAdd?: Array<{ imei: string; serialNumber: string }>
+  ) {
     try {
       const response = await fetch(apiUrl(`api/products/${id}/stock`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ adjustment, reason }),
+        body: JSON.stringify({ adjustment, reason, phoneIdentifiersToAdd }),
       });
 
       const data = await response.json();

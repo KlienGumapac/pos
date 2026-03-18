@@ -67,7 +67,8 @@ export default function StocksPage() {
   const [selectedProductForPrint, setSelectedProductForPrint] = useState<any>(null);
   const [stockAdjustment, setStockAdjustment] = useState({
     adjustment: '',
-    reason: ''
+    reason: '',
+    phoneIdentifiersToAdd: [] as Array<{ imei: string; serialNumber: string }>
   });
   const [editFormData, setEditFormData] = useState({
     name: "",
@@ -616,7 +617,11 @@ export default function StocksPage() {
 
   const handleStockAdjustment = (product: any) => {
     setSelectedProduct(product);
-    setStockAdjustment({ adjustment: '', reason: '' });
+    setStockAdjustment({
+      adjustment: '',
+      reason: '',
+      phoneIdentifiersToAdd: []
+    });
     setIsStockModalOpen(true);
   };
 
@@ -625,6 +630,39 @@ export default function StocksPage() {
       ...prev,
       [field]: value
     }));
+  };
+
+  const addStockPhoneIdentifier = () => {
+    setStockAdjustment(prev => ({
+      ...prev,
+      phoneIdentifiersToAdd: [...prev.phoneIdentifiersToAdd, { imei: '', serialNumber: '' }]
+    }));
+  };
+
+  const removeStockPhoneIdentifier = (index: number) => {
+    setStockAdjustment(prev => {
+      const next = {
+        ...prev,
+        phoneIdentifiersToAdd: prev.phoneIdentifiersToAdd.filter((_, i) => i !== index)
+      };
+      const validCount = next.phoneIdentifiersToAdd.filter(p => p.imei.trim() || p.serialNumber.trim()).length;
+      next.adjustment = validCount > 0 ? String(validCount) : '';
+      return next;
+    });
+  };
+
+  const updateStockPhoneIdentifier = (index: number, field: 'imei' | 'serialNumber', value: string) => {
+    setStockAdjustment(prev => {
+      const next = {
+        ...prev,
+        phoneIdentifiersToAdd: prev.phoneIdentifiersToAdd.map((p, i) =>
+          i === index ? { ...p, [field]: value } : p
+        )
+      };
+      const validCount = next.phoneIdentifiersToAdd.filter(p => p.imei.trim() || p.serialNumber.trim()).length;
+      next.adjustment = validCount > 0 ? String(validCount) : '';
+      return next;
+    });
   };
 
   const confirmStockAdjustment = async () => {
@@ -641,17 +679,23 @@ export default function StocksPage() {
         return;
       }
 
+      const usesIdentifiers = Array.isArray(selectedProduct.phoneIdentifiers) && selectedProduct.phoneIdentifiers.length > 0;
+      const validToAdd = (stockAdjustment.phoneIdentifiersToAdd || [])
+        .map((x) => ({ imei: (x.imei || '').trim(), serialNumber: (x.serialNumber || '').trim() }))
+        .filter((x) => x.imei || x.serialNumber);
+
       const result = await ProductService.adjustStock(
         selectedProduct.id, 
         adjustment, 
-        stockAdjustment.reason
+        stockAdjustment.reason,
+        usesIdentifiers ? validToAdd : undefined
       );
       
       if (result.success) {
         setSuccess(`Stock ${adjustment >= 0 ? 'added' : 'reduced'} successfully! New stock: ${result.product.stock}`);
         setIsStockModalOpen(false);
         setSelectedProduct(null);
-        setStockAdjustment({ adjustment: '', reason: '' });
+        setStockAdjustment({ adjustment: '', reason: '', phoneIdentifiersToAdd: [] });
         // Reload products
         await loadProducts();
       } else {
@@ -2316,11 +2360,87 @@ export default function StocksPage() {
                         value={stockAdjustment.adjustment}
                         onChange={(e) => handleStockInputChange('adjustment', e.target.value)}
                         className="mt-1"
+                        disabled={Array.isArray(selectedProduct.phoneIdentifiers) && selectedProduct.phoneIdentifiers.length > 0}
                       />
                       <p className="text-xs text-slate-500 mt-1">
                         Use positive numbers to add stock, negative numbers to reduce stock
                       </p>
+                      {Array.isArray(selectedProduct.phoneIdentifiers) && selectedProduct.phoneIdentifiers.length > 0 && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Auto from IMEI/serial count</p>
+                      )}
                     </div>
+
+                    {/* IMEI & Serial Numbers (Adjust Stock - Add) */}
+                    {Array.isArray(selectedProduct.phoneIdentifiers) && selectedProduct.phoneIdentifiers.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">Add IMEI & Serial Numbers</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addStockPhoneIdentifier}
+                            disabled={isLoading}
+                            className="flex items-center gap-2"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Add
+                          </Button>
+                        </div>
+
+                        {stockAdjustment.phoneIdentifiersToAdd.length === 0 ? (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Click "Add" then enter IMEI/Serial numbers. Stock added will equal the number of valid entries.
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            {stockAdjustment.phoneIdentifiersToAdd.map((identifier, index) => (
+                              <div key={index} className="p-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <Label htmlFor={`stock-imei-${index}`} className="text-xs text-slate-600 dark:text-slate-400">
+                                      IMEI
+                                    </Label>
+                                    <Input
+                                      id={`stock-imei-${index}`}
+                                      placeholder="Enter IMEI"
+                                      value={identifier.imei}
+                                      onChange={(e) => updateStockPhoneIdentifier(index, 'imei', e.target.value)}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor={`stock-serial-${index}`} className="text-xs text-slate-600 dark:text-slate-400">
+                                      Serial
+                                    </Label>
+                                    <Input
+                                      id={`stock-serial-${index}`}
+                                      placeholder="Enter serial number"
+                                      value={identifier.serialNumber}
+                                      onChange={(e) => updateStockPhoneIdentifier(index, 'serialNumber', e.target.value)}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="flex justify-end mt-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeStockPhoneIdentifier(index)}
+                                    disabled={isLoading}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-1" />
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div>
                       <Label htmlFor="reason">Reason (Optional)</Label>
@@ -2338,7 +2458,11 @@ export default function StocksPage() {
                     {stockAdjustment.adjustment && !isNaN(parseInt(stockAdjustment.adjustment)) && (
                       <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
                         <p className="text-sm text-slate-600 dark:text-slate-400">
-                          <strong>New Stock:</strong> {selectedProduct.stock + parseInt(stockAdjustment.adjustment)} units
+                          <strong>New Stock:</strong>{" "}
+                          {Array.isArray(selectedProduct.phoneIdentifiers) && selectedProduct.phoneIdentifiers.length > 0
+                            ? (selectedProduct.phoneIdentifiers.length + parseInt(stockAdjustment.adjustment))
+                            : (selectedProduct.stock + parseInt(stockAdjustment.adjustment))}{" "}
+                          units
                         </p>
                       </div>
                     )}

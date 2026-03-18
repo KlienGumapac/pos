@@ -217,7 +217,8 @@ function CashierStocksPageContent() {
   const loadAvailableProducts = useCallback(async () => {
     setIsLoadingProducts(true);
     try {
-      const products = await getAvailableProductsOptimized();
+      // Ensure we always pick up latest admin edits (e.g., selling price)
+      const products = await getAvailableProductsOptimized(true);
       setAvailableProducts(products);
     } catch (error) {
       console.error('Error loading available products:', error);
@@ -268,7 +269,7 @@ function CashierStocksPageContent() {
   }, [user?.id]);
 
   // Optimized function to get available products with caching and batch fetching
-  const getAvailableProductsOptimized = useCallback(async () => {
+  const getAvailableProductsOptimized = useCallback(async (forceRefresh: boolean = false) => {
     const products: any[] = [];
     const productIds = new Set<string>();
     
@@ -281,12 +282,12 @@ function CashierStocksPageContent() {
       }
     });
 
-    // Check cache first and only fetch missing products
+    // Check cache first and only fetch missing products (or force refresh)
     const uncachedProductIds: string[] = [];
     const cachedProducts: any[] = [];
     
     Array.from(productIds).forEach(productId => {
-      if (productCache.has(productId)) {
+      if (!forceRefresh && productCache.has(productId)) {
         cachedProducts.push(productCache.get(productId));
       } else {
         uncachedProductIds.push(productId);
@@ -351,12 +352,16 @@ function CashierStocksPageContent() {
           if (existingProduct) {
             existingProduct.stock += item.quantity;
             existingProduct.phoneIdentifiers = [...(existingProduct.phoneIdentifiers || []), ...itemPhoneIds];
+            // Always reflect the latest selling price from the product record when available
+            if (typeof productDetail?.price === 'number') {
+              existingProduct.price = productDetail.price;
+            }
           } else {
             const productWithImages = {
               id: item.productId,
               name: item.productName,
               sku: item.productSku,
-              price: item.price,
+              price: typeof productDetail?.price === 'number' ? productDetail.price : item.price,
               stock: item.quantity,
               category: item.category || "Accessories",
               barcode: productDetail?.barcode || '',
