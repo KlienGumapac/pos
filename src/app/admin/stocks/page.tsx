@@ -3338,5 +3338,6 @@ export default function StocksPage() {
           </Dialog>
     </ProtectedRoute>
   );
+  
 }
 
