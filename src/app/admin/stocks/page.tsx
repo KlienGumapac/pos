@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
@@ -96,6 +96,8 @@ export default function StocksPage() {
     images: [] as string[],
     phoneIdentifiers: [] as Array<{ imei: string; serialNumber: string }>
   });
+  // Barcode scanner -> IMEI/Serial input routing (Add New Product modal)
+  const [activeIdentifierField, setActiveIdentifierField] = useState<{ index: number; field: 'imei' | 'serialNumber' } | null>(null);
 
   // Image upload state
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -487,6 +489,49 @@ export default function StocksPage() {
       return next;
     });
   };
+
+  // Barcode scanner support for IMEI/Serial inputs in Add New Product modal.
+  // Scanner sends rapid keystrokes ending with Enter; we buffer and then write into the last focused field.
+  const handleScannerCommit = useCallback((scanned: string) => {
+    if (!activeIdentifierField) return;
+    updatePhoneIdentifier(activeIdentifierField.index, activeIdentifierField.field, scanned);
+  }, [activeIdentifierField]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    if (!activeIdentifierField) return;
+
+    let barcodeBuffer = "";
+    let barcodeTimeout: NodeJS.Timeout;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isModalOpen || !activeIdentifierField) return;
+
+      if (event.key === "Enter") {
+        if (barcodeBuffer.length > 0) {
+          event.preventDefault();
+          const scanned = barcodeBuffer.trim();
+          barcodeBuffer = "";
+          if (scanned) handleScannerCommit(scanned);
+        }
+        return;
+      }
+
+      if (event.key.length === 1) {
+        barcodeBuffer += event.key;
+        clearTimeout(barcodeTimeout);
+        barcodeTimeout = setTimeout(() => {
+          barcodeBuffer = "";
+        }, 100);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      clearTimeout(barcodeTimeout);
+    };
+  }, [isModalOpen, activeIdentifierField, handleScannerCommit]);
 
   // Edit form IMEI/Serial handlers
   const addEditPhoneIdentifier = () => {
@@ -1311,26 +1356,30 @@ export default function StocksPage() {
                           <div key={index} className="flex flex-col sm:flex-row gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border">
                             <div className="flex-1">
                               <Label htmlFor={`imei-${index}`} className="text-xs text-slate-600 dark:text-slate-400">
-                                IMEI {index + 1}
+                                IMEI
                               </Label>
                               <Input
                                 id={`imei-${index}`}
                                 placeholder="Enter IMEI number"
                                 value={identifier.imei}
                                 onChange={(e) => updatePhoneIdentifier(index, 'imei', e.target.value)}
+                                onFocus={() => setActiveIdentifierField({ index, field: 'imei' })}
+                                onClick={() => setActiveIdentifierField({ index, field: 'imei' })}
                                 disabled={isLoading}
                                 className="mt-1"
                               />
                             </div>
                             <div className="flex-1">
                               <Label htmlFor={`serial-${index}`} className="text-xs text-slate-600 dark:text-slate-400">
-                                Serial Number {index + 1}
+                                Serial Number
                               </Label>
                               <Input
                                 id={`serial-${index}`}
                                 placeholder="Enter serial number"
                                 value={identifier.serialNumber}
                                 onChange={(e) => updatePhoneIdentifier(index, 'serialNumber', e.target.value)}
+                                onFocus={() => setActiveIdentifierField({ index, field: 'serialNumber' })}
+                                onClick={() => setActiveIdentifierField({ index, field: 'serialNumber' })}
                                 disabled={isLoading}
                                 className="mt-1"
                               />
