@@ -508,12 +508,12 @@ export default function StocksPage() {
       if (!isModalOpen || !activeIdentifierField) return;
 
       if (event.key === "Enter") {
-        if (barcodeBuffer.length > 0) {
-          event.preventDefault();
-          const scanned = barcodeBuffer.trim();
-          barcodeBuffer = "";
-          if (scanned) handleScannerCommit(scanned);
-        }
+        // Prevent form submit / modal close when scanner sends Enter
+        event.preventDefault();
+        event.stopPropagation();
+        const scanned = barcodeBuffer.trim();
+        barcodeBuffer = "";
+        if (scanned) handleScannerCommit(scanned);
         return;
       }
 
