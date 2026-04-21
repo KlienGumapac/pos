@@ -9,10 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Users, User, UserPlus, Settings, Eye, EyeOff, ArrowUpDown, Edit, Trash2, AlertCircle, CheckCircle, RefreshCw, Clock, Power, PowerOff } from "lucide-react";
+import { Users, User, UserPlus, Settings, Eye, EyeOff, ArrowUpDown, Edit, Trash2, AlertCircle, CheckCircle, RefreshCw, Clock, Power, PowerOff, Printer } from "lucide-react";
 import { UserService } from "@/lib/userService";
+import { DistributionService } from "@/lib/distributionService";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function UsersPage() {
+  const { user: adminUser } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +29,7 @@ export default function UsersPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [actionType, setActionType] = useState<'activate' | 'deactivate' | null>(null);
+  const [printingCashierId, setPrintingCashierId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     username: "",
     email: "",
@@ -293,6 +297,197 @@ export default function UsersPage() {
       setIsConfirmModalOpen(false);
       setSelectedUser(null);
       setActionType(null);
+    }
+  };
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-PH", {
+      style: "currency",
+      currency: "PHP",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+
+  const handlePrintCashierStock = async (cashier: any) => {
+    const cashierId = cashier.id || cashier._id;
+    if (!cashierId) return;
+
+    setError("");
+    setSuccess("");
+    setPrintingCashierId(cashierId);
+
+    try {
+      const result = await DistributionService.getCashierDistributions(cashierId);
+      if (!result.success || !result.distributions) {
+        setError(result.error || "Failed to load cashier stock for printing");
+        return;
+      }
+
+      // Aggregate all active stock in cashier distributions by category/product
+      const grouped = new Map<string, Map<string, { productName: string; quantity: number; price: number }>>();
+      result.distributions.forEach((dist) => {
+        if (dist.status !== "pending" && dist.status !== "delivered") return;
+        (dist.items || []).forEach((item) => {
+          if (!item || item.quantity <= 0) return;
+          const category = item.category || "Uncategorized";
+          if (!grouped.has(category)) grouped.set(category, new Map());
+          const categoryMap = grouped.get(category)!;
+          const key = item.productId || item.productSku || item.productName;
+          const existing = categoryMap.get(key);
+          if (existing) {
+            existing.quantity += item.quantity;
+            existing.price = item.price;
+          } else {
+            categoryMap.set(key, {
+              productName: item.productName,
+              quantity: item.quantity,
+              price: item.price,
+            });
+          }
+        });
+      });
+
+      const categories = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      if (categories.length === 0) {
+        setError("No stock found for this cashier");
+        return;
+      }
+
+      const printedAt = new Date();
+      const printedAtText = printedAt.toLocaleString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+
+      const cashierName = cashier.username || cashier.name || cashier.email || "Cashier";
+      const printedBy = adminUser?.username || "Admin";
+
+      let grandTotalQty = 0;
+      let grandTotalValue = 0;
+
+      const categorySections = categories
+        .map(([category, productsMap]) => {
+          const rows = Array.from(productsMap.values()).sort((a, b) => a.productName.localeCompare(b.productName));
+          const categoryQty = rows.reduce((sum, p) => sum + p.quantity, 0);
+          const categoryValue = rows.reduce((sum, p) => sum + p.quantity * p.price, 0);
+          grandTotalQty += categoryQty;
+          grandTotalValue += categoryValue;
+
+          const productRows = rows
+            .map(
+              (p) => `
+                <tr>
+                  <td>${p.productName}</td>
+                  <td class="num">${formatCurrency(p.price)}</td>
+                  <td class="num">${p.quantity}</td>
+                  <td class="num">${formatCurrency(p.quantity * p.price)}</td>
+                </tr>
+              `
+            )
+            .join("");
+
+          return `
+            <section class="category-block">
+              <h2>${category}</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product Name</th>
+                    <th class="num">Price</th>
+                    <th class="num">Quantity</th>
+                    <th class="num">Total Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${productRows}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td><strong>Category Total</strong></td>
+                    <td></td>
+                    <td class="num"><strong>${categoryQty}</strong></td>
+                    <td class="num"><strong>${formatCurrency(categoryValue)}</strong></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </section>
+          `;
+        })
+        .join("");
+
+      const printContent = `
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Cashier Stock Report - ${cashierName}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 24px; }
+              .header { border-bottom: 2px solid #1f2937; padding-bottom: 14px; margin-bottom: 18px; }
+              .title { font-size: 22px; font-weight: 700; margin: 0; }
+              .subtitle { margin-top: 4px; color: #4b5563; font-size: 13px; }
+              .meta { margin-top: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; font-size: 12px; }
+              .meta .label { color: #6b7280; }
+              .category-block { margin-top: 18px; page-break-inside: avoid; }
+              .category-block h2 { margin: 0 0 8px 0; font-size: 15px; border-left: 4px solid #2563eb; padding-left: 8px; }
+              table { width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; }
+              th, td { border: 1px solid #d1d5db; padding: 8px; font-size: 12px; }
+              th { background: #f3f4f6; text-align: left; }
+              .num { text-align: right; white-space: nowrap; }
+              tfoot td { background: #f9fafb; }
+              .grand-total { margin-top: 20px; border-top: 2px solid #111827; padding-top: 10px; display: flex; justify-content: flex-end; gap: 24px; font-size: 13px; font-weight: 700; }
+              .footer { margin-top: 24px; font-size: 11px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+              @media print {
+                @page { size: A4; margin: 14mm; }
+                body { margin: 0; }
+              }
+            </style>
+          </head>
+          <body>
+            <header class="header">
+              <h1 class="title">Cashier Stock Report</h1>
+              <p class="subtitle">Categorized stock listing for cashier inventory</p>
+              <div class="meta">
+                <div><span class="label">Cashier:</span> ${cashierName}</div>
+                <div><span class="label">Printed By:</span> ${printedBy}</div>
+                <div><span class="label">Date Created:</span> ${printedAtText}</div>
+                <div><span class="label">Role:</span> Cashier Stock Summary</div>
+              </div>
+            </header>
+
+            ${categorySections}
+
+            <div class="grand-total">
+              <div>Overall Quantity: ${grandTotalQty}</div>
+              <div>Overall Value: ${formatCurrency(grandTotalValue)}</div>
+            </div>
+
+            <footer class="footer">
+              This report is system-generated from current distribution records.
+            </footer>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open("", "_blank", "width=1024,height=768");
+      if (!printWindow) {
+        setError("Unable to open print window. Please allow pop-ups and try again.");
+        return;
+      }
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      setSuccess(`Cashier stock report prepared for ${cashierName}`);
+    } catch {
+      setError("Failed to prepare cashier stock print");
+    } finally {
+      setPrintingCashierId(null);
     }
   };
 
@@ -785,6 +980,18 @@ export default function UsersPage() {
                               >
                                 {user.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
                               </Button>
+                              {user.user_type === 'cashier' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-9 w-9 p-0 hover:bg-amber-100 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                                  onClick={() => handlePrintCashierStock(user)}
+                                  title="Print Stock"
+                                  disabled={printingCashierId === (user.id || user._id)}
+                                >
+                                  <Printer className="w-4 h-4" />
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -843,6 +1050,18 @@ export default function UsersPage() {
                           >
                             {user.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
                           </Button>
+                          {user.user_type === 'cashier' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 w-9 p-0 hover:bg-amber-100 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                              onClick={() => handlePrintCashierStock(user)}
+                              title="Print Stock"
+                              disabled={printingCashierId === (user.id || user._id)}
+                            >
+                              <Printer className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                       

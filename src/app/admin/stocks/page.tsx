@@ -57,6 +57,8 @@ export default function StocksPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [overallStock, setOverallStock] = useState<number>(0);
+  const [isLoadingOverallStock, setIsLoadingOverallStock] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
@@ -631,6 +633,43 @@ export default function StocksPage() {
     setSelectedProduct(product);
     setIsViewModalOpen(true);
   };
+
+  // Compute overall stock = admin stock + all cashier-held stock for this product
+  const loadOverallStock = useCallback(async (product: any) => {
+    if (!product?.id) {
+      setOverallStock(0);
+      return;
+    }
+
+    setIsLoadingOverallStock(true);
+    try {
+      const result = await DistributionService.getDistributions();
+      if (result.success && result.distributions) {
+        const cashierStock = result.distributions.reduce((sum: number, dist: any) => {
+          if (dist.status !== 'pending' && dist.status !== 'delivered') return sum;
+          const productQty = (dist.items || []).reduce((itemSum: number, item: any) => {
+            if (item.productId === product.id) return itemSum + (item.quantity || 0);
+            return itemSum;
+          }, 0);
+          return sum + productQty;
+        }, 0);
+
+        setOverallStock((product.stock || 0) + cashierStock);
+      } else {
+        setOverallStock(product.stock || 0);
+      }
+    } catch (err) {
+      setOverallStock(product.stock || 0);
+    } finally {
+      setIsLoadingOverallStock(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isViewModalOpen && selectedProduct?.id) {
+      loadOverallStock(selectedProduct);
+    }
+  }, [isViewModalOpen, selectedProduct?.id, loadOverallStock]);
 
   const handleDeleteProduct = (product: any) => {
     setSelectedProduct(product);
@@ -2118,7 +2157,7 @@ export default function StocksPage() {
                       </div>
 
                       {/* Key Metrics */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                         <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 sm:p-4">
                           <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mb-1">Selling Price</div>
                           <div className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
@@ -2129,6 +2168,12 @@ export default function StocksPage() {
                           <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mb-1">Current Stock</div>
                           <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">
                             {selectedProduct.stock} units
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 sm:p-4">
+                          <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mb-1">Overall Stock</div>
+                          <div className="text-xl sm:text-2xl font-bold text-blue-600 dark:text-blue-400">
+                            {isLoadingOverallStock ? "..." : `${overallStock} units`}
                           </div>
                         </div>
                       </div>
@@ -2182,11 +2227,17 @@ export default function StocksPage() {
                             ₱{selectedProduct.price.toFixed(2)}
                           </p>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                           <div>
                             <Label className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400">Current Stock</Label>
                             <p className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-1">
                               {selectedProduct.stock} units
+                            </p>
+                          </div>
+                          <div>
+                            <Label className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400">Overall Stock</Label>
+                            <p className="text-lg sm:text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                              {isLoadingOverallStock ? "..." : `${overallStock} units`}
                             </p>
                           </div>
                           <div>
