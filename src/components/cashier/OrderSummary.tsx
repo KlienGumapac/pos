@@ -400,7 +400,7 @@ export function OrderSummary({
                           const nextQuantity = parseInt(e.target.value, 10);
                           handleQuantityInputChange(item, nextQuantity);
                         }}
-                        className="w-12 h-6 text-center text-sm"
+                        className="w-24 h-6 text-center text-sm px-1"
                         min="1"
                         max={item.stock}
                       />
@@ -421,7 +421,7 @@ export function OrderSummary({
                     <span className="text-xs text-slate-600 dark:text-slate-400">Discount (₱):</span>
                     <Input
                       type="number"
-                      value={discounts[item.id] ?? 0}
+                      value={(discounts[item.id] ?? 0) === 0 ? "" : (discounts[item.id] ?? 0)}
                       onChange={(e) => handleDiscountChange(item.id, parseFloat(e.target.value) || 0)}
                       className="w-20 h-6 text-center text-sm"
                       min="0"
@@ -500,7 +500,7 @@ export function OrderSummary({
             <span className="text-xs text-slate-600 dark:text-slate-400">Overall Discount (₱):</span>
             <Input
               type="number"
-              value={overallDiscount ?? 0}
+              value={(overallDiscount ?? 0) === 0 ? "" : (overallDiscount ?? 0)}
               onChange={(e) => setOverallDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
               className="w-20 h-6 text-center text-sm"
               min="0"
